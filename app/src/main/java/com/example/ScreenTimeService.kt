@@ -91,6 +91,7 @@ class ScreenTimeService : Service() {
     
     private var isBreakActive = false
     private var breakJob: Job? = null
+    private var breakWakeLock: android.os.PowerManager.WakeLock? = null
 
     private var windowManager: WindowManager? = null
     private var breakOverlayView: View? = null
@@ -214,7 +215,15 @@ class ScreenTimeService : Service() {
             builder.addAction(android.R.drawable.ic_media_pause, "Pause Tracking", stopPendingIntent)
         }
 
-        startForeground(101, builder.build())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                101, 
+                builder.build(), 
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(101, builder.build())
+        }
     }
 
     private fun startTicker() {
@@ -259,6 +268,22 @@ class ScreenTimeService : Service() {
         }
     }
 
+    private fun vibratePhone(durationMs: Long) {
+        try {
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+            if (vibrator != null && vibrator.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(android.os.VibrationEffect.createOneShot(durationMs, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(durationMs)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ScreenTimeService", "Error playing vibration", e)
+        }
+    }
+
     private fun stopTicker() {
         tickerJob?.cancel()
     }
@@ -269,25 +294,59 @@ class ScreenTimeService : Service() {
         isFloatingTimerDismissedForSession = false // Reset dismiss state for next session
         stopTicker()
         
-        serviceScope.launch(Dispatchers.Main) {
-            removeFloatingTimerOverlay() // Remove floating timer during fullscreen break block
-            val breakDuration = withContext(Dispatchers.IO) {
-                settingsRepository.breakDurationFlow.first()
-            }
-            showBreakOverlay(breakDuration)
-        }
-
-        breakJob = serviceScope.launch {
+        serviceScope.launch {
             val breakDuration = settingsRepository.breakDurationFlow.first()
-            var remaining = breakDuration
-            while (isActive && remaining > 0) {
-                delay(1000)
-                remaining--
+            val breakEndTimeRealtime = android.os.SystemClock.elapsedRealtime() + breakDuration * 1000L
+            
+            // Acquire wake lock to keep CPU awake during break time
+            try {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                breakWakeLock = powerManager.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "FocusLock:BreakWakeLock").apply {
+                    acquire(breakDuration * 1000L + 5000L)
+                }
+            } catch (e: Exception) {
+                Log.e("ScreenTimeService", "Error holding wake lock during break", e)
             }
+
+            withContext(Dispatchers.Main) {
+                removeFloatingTimerOverlay() // Remove floating timer during fullscreen break block
+                showBreakOverlay(breakEndTimeRealtime)
+            }
+
+            var lastBeepedAndVivated = -1
+
+            // Keep checking remaining break duration based on real timestamp
+            while (isActive) {
+                val now = android.os.SystemClock.elapsedRealtime()
+                val remainingSeconds = ((breakEndTimeRealtime - now) / 1000).toInt().coerceAtLeast(0)
+                
+                // Play beep and vibration 3 times (at 3, 2, 1 seconds left) before timer ends
+                if (remainingSeconds in 1..3 && remainingSeconds != lastBeepedAndVivated) {
+                    lastBeepedAndVivated = remainingSeconds
+                    playWarningTone()
+                    vibratePhone(250)
+                }
+
+                if (now >= breakEndTimeRealtime) {
+                    break
+                }
+                delay(200) // Fast check so we don't skip seconds
+            }
+
+            // Release wake lock safely
+            try {
+                if (breakWakeLock?.isHeld == true) {
+                    breakWakeLock?.release()
+                }
+            } catch (e: Exception) {
+                Log.e("ScreenTimeService", "Error releasing wake lock after break", e)
+            }
+            breakWakeLock = null
+
             // End break
             settingsRepository.setCurrentSessionSeconds(0)
             isBreakActive = false
-            serviceScope.launch(Dispatchers.Main) {
+            withContext(Dispatchers.Main) {
                 removeBreakOverlay()
                 updateFloatingTimerVisibility()
             }
@@ -295,7 +354,7 @@ class ScreenTimeService : Service() {
         }
     }
 
-    private fun showBreakOverlay(breakDuration: Int) {
+    private fun showBreakOverlay(breakEndTimeRealtime: Long) {
         if (breakOverlayView != null) return
 
         val lifecycleOwner = MyServiceLifecycleOwner()
@@ -309,13 +368,14 @@ class ScreenTimeService : Service() {
             setViewTreeViewModelStoreOwner(lifecycleOwner)
             setViewTreeSavedStateRegistryOwner(lifecycleOwner)
             setContent {
-                var secondsLeft by remember { mutableStateOf(breakDuration) }
+                var currentRealtime by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
                 LaunchedEffect(Unit) {
-                    while (secondsLeft > 0) {
-                        delay(1000)
-                        secondsLeft--
+                    while (true) {
+                        currentRealtime = android.os.SystemClock.elapsedRealtime()
+                        delay(250)
                     }
                 }
+                val secondsLeft = ((breakEndTimeRealtime - currentRealtime) / 1000).toInt().coerceAtLeast(0)
                 MaterialTheme {
                     Box(
                         modifier = Modifier
@@ -346,7 +406,7 @@ class ScreenTimeService : Service() {
                             val minutes = secondsLeft / 60
                             val seconds = secondsLeft % 60
                             Text(
-                                text = String.format("%02d:%02d", minutes, seconds),
+                                text = "%02d:%02d".format(minutes, seconds),
                                 color = MaterialTheme.colorScheme.error,
                                 fontSize = 72.sp,
                                 fontWeight = FontWeight.Bold
@@ -577,6 +637,13 @@ class ScreenTimeService : Service() {
         serviceScope.cancel()
         removeBreakOverlay()
         removeFloatingTimerOverlay()
+        try {
+            if (breakWakeLock?.isHeld == true) {
+                breakWakeLock?.release()
+            }
+        } catch (e: Exception) {
+            Log.e("ScreenTimeService", "Error releasing wake lock in onDestroy", e)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

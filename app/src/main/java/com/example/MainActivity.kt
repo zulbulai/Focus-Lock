@@ -583,80 +583,36 @@ fun SettingsScreen(
 @Composable
 fun DeveloperFooter(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable {
-                try {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://instagram.com/jitendrauno"))
-                    intent.addCategory(Intent.CATEGORY_BROWSABLE) // safe standard category setting
-                    context.startActivity(intent)
-                } catch (e: Exception) {
-                    // fall back
-                }
-            },
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    Button(
+        onClick = {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://instagram.com/jitendrauno"))
+                intent.addCategory(Intent.CATEGORY_BROWSABLE)
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                // fallback
+            }
+        },
+        modifier = modifier.fillMaxWidth(),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         ),
-        shape = RoundedCornerShape(20.dp),
-        border = androidx.compose.foundation.BorderStroke(
-            width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-        )
+        shape = RoundedCornerShape(16.dp),
+        contentPadding = PaddingValues(16.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFFF91A4E), // Instagram Red-Orange
-                                Color(0xFF8A3AB9), // Purple
-                                Color(0xFF4C58D2)  // Blue
-                            )
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = "Developer Profile",
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "डेवलपर की जानकारी (Developer Info)",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    letterSpacing = 1.sp
-                )
-                Text(
-                    text = "Jitendra • @jitendrauno",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "Tap to connect on Instagram for updates",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Icon(
-                imageVector = Icons.Default.ArrowForward,
-                contentDescription = "Open Link",
-                tint = MaterialTheme.colorScheme.outline
-            )
-        }
+        Icon(
+            imageVector = Icons.Default.Person,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "Follow on Instagram @jitendrauno",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.bodyMedium
+        )
     }
 }
 
@@ -665,123 +621,49 @@ fun QuickSettingsTileGuideCard(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val isNativelySupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.15f)
-        ),
-        shape = RoundedCornerShape(24.dp),
-        border = androidx.compose.foundation.BorderStroke(
-            width = 1.dp,
-            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f)
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.secondary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSecondary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Column {
-                    Text(
-                        text = "वन-क्लिक क्विक टाइल (QS Tile)",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                    Text(
-                        text = "Enable tracking in 1-tap like Wi-Fi & Data",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
-                    )
-                }
-            }
-
-            Text(
-                text = "जैसे आप मोबाइल में वाई-फाई या डेटा ऑन करते हैं, वैसे ही नोटिफिकेशन पैनल को नीचे खींचकर एक क्लिक में Focus Lock को चालू/बंद कर सकते हैं!",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 20.sp
-            )
-
-            Column(
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    .padding(12.dp)
-            ) {
-                Text(
-                    text = "टाइल जोड़ने का तरीका (How to Setup):",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.secondary
-                )
-                Text(
-                    text = "1. मोबाइल के नोटिफिकेशन पैनल (Status Bar) को नीचे स्वाइप करें।",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "2. एडिट (✏️ / Pencil) बटन पर टैप करें।",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "3. नीचे छूटे बटन्स में से 'Focus Lock' ढूंढें और उसे खींचकर ऊपर सक्रिय टाइल्स (Wifi/Data के पास) में ले जाएं।",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
+    Button(
+        onClick = {
             if (isNativelySupported) {
-                Button(
-                    onClick = {
-                        try {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                val statusBarManager = context.getSystemService(android.app.StatusBarManager::class.java)
-                                val componentName = ComponentName(context, FocusLockTileService::class.java)
-                                statusBarManager?.requestAddTileService(
-                                    componentName,
-                                    "Focus Lock",
-                                    android.graphics.drawable.Icon.createWithResource(context, android.R.drawable.ic_lock_lock),
-                                    context.mainExecutor
-                                ) { _ -> }
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.e("MainActivity", "Error requesting tile service", e)
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary
-                    ),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("नोटिफिकेशन पैनल में बटन जोड़ें (Add Tile)", fontWeight = FontWeight.Bold)
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        val statusBarManager = context.getSystemService(android.app.StatusBarManager::class.java)
+                        val componentName = ComponentName(context, FocusLockTileService::class.java)
+                        statusBarManager?.requestAddTileService(
+                            componentName,
+                            "Focus Lock",
+                            android.graphics.drawable.Icon.createWithResource(context, android.R.drawable.ic_lock_lock),
+                            context.mainExecutor
+                        ) { _ -> }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "Error requesting tile service", e)
                 }
+            } else {
+                android.widget.Toast.makeText(
+                    context, 
+                    "Status Bar को नीचे स्वाइप कर 'Edit' बटन से 'Focus Lock' जोड़ें!", 
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
             }
-        }
+        },
+        modifier = modifier.fillMaxWidth(),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+        ),
+        shape = RoundedCornerShape(16.dp),
+        contentPadding = PaddingValues(16.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.Settings,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "Status Bar में शर्टकट जोड़ें (Add Quick Status Tile)",
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.bodyMedium
+        )
     }
 }
