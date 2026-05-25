@@ -231,6 +231,11 @@ class ScreenTimeService : Service() {
         tickerJob = serviceScope.launch {
             while (isActive && isScreenOn && !isBreakActive) {
                 delay(1000)
+                
+                // Track real-time phone screen-on usage fallback
+                val currentScreenOn = settingsRepository.fallbackScreenOnSecondsFlow.first()
+                settingsRepository.setFallbackScreenOnSeconds(currentScreenOn + 1)
+
                 if (isTrackingPaused) {
                     continue
                 }
@@ -260,9 +265,22 @@ class ScreenTimeService : Service() {
 
     private fun playWarningTone() {
         try {
-            val toneGen = android.media.ToneGenerator(android.media.AudioManager.STREAM_ALARM, 85)
-            toneGen.startTone(android.media.ToneGenerator.TONE_CDMA_PIP, 400)
-            toneGen.release()
+            val toneId = runBlocking { settingsRepository.selectedAlertToneFlow.first() }
+            val toneGen = android.media.ToneGenerator(android.media.AudioManager.STREAM_ALARM, 90)
+            val toneType = when (toneId) {
+                1 -> android.media.ToneGenerator.TONE_CDMA_PIP
+                2 -> android.media.ToneGenerator.TONE_PROP_PROMPT
+                3 -> android.media.ToneGenerator.TONE_CDMA_HIGH_L
+                4 -> android.media.ToneGenerator.TONE_PROP_BEEP
+                5 -> android.media.ToneGenerator.TONE_CDMA_ABBR_ALERT
+                else -> android.media.ToneGenerator.TONE_CDMA_PIP
+            }
+            toneGen.startTone(toneType, 400)
+            // Release after tone completes
+            serviceScope.launch {
+                delay(500)
+                try { toneGen.release() } catch (ex: Exception) {}
+            }
         } catch (e: Exception) {
             Log.e("ScreenTimeService", "Error playing warning beep", e)
         }

@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -56,23 +57,14 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MyApplicationTheme {
-                val navController = rememberNavController()
-                NavHost(navController = navController, startDestination = "dashboard") {
-                    composable("dashboard") {
-                        DashboardScreen(
-                            settingsRepository = settingsRepository,
-                            onStartService = { checkAndStartService() },
-                            onStopService = { stopScreenTimeService() },
-                            onNavigateSettings = { navController.navigate("settings") }
-                        )
-                    }
-                    composable("settings") {
-                        SettingsScreen(
-                            settingsRepository = settingsRepository,
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
-                }
+                val database = remember { com.example.data.AppDatabase.getDatabase(applicationContext) }
+                com.example.ui.UnifiedWorkspace(
+                    database = database,
+                    settingsRepository = settingsRepository,
+                    onStartService = { checkAndStartService() },
+                    onStopService = { stopScreenTimeService() },
+                    onNavigateSettings = {}
+                )
             }
         }
     }
@@ -110,10 +102,68 @@ fun DashboardScreen(
     settingsRepository: SettingsRepository,
     onStartService: () -> Unit,
     onStopService: () -> Unit,
-    onNavigateSettings: () -> Unit
+    onNavigateSettings: () -> Unit,
+    onNavigateHabits: () -> Unit,
+    onNavigateTasks: () -> Unit
 ) {
     val currentSessionSeconds by settingsRepository.currentSessionSecondsFlow.collectAsStateWithLifecycle(initialValue = 0)
     val workDuration by settingsRepository.workDurationFlow.collectAsStateWithLifecycle(initialValue = 30 * 60)
+    val fallbackSecs by settingsRepository.fallbackScreenOnSecondsFlow.collectAsStateWithLifecycle(initialValue = 11245)
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    
+    // Real-time task synchronization
+    val dashboardDb = remember(context) { com.example.data.AppDatabase.getDatabase(context) }
+    val dashboardTasksFlow = remember(dashboardDb) { dashboardDb.taskDao().getAllTasks() }
+    val dashboardTasks by dashboardTasksFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val totalTasks = dashboardTasks.size
+    val completedTasks = dashboardTasks.count { it.isCompleted }
+    val pendingTasks = totalTasks - completedTasks
+    val highPriorityPending = dashboardTasks.count { !it.isCompleted && it.priority == "High" }
+    val tasksProgress = if (totalTasks > 0) completedTasks.toFloat() / totalTasks.toFloat() else 0f
+    val tasksProgressPercentText = "${(tasksProgress * 100).toInt()}%"
+    var hasPermission by remember { mutableStateOf(false) }
+    var usageStats by remember { mutableStateOf<com.example.data.UsageStatsHelper.DynamicUsageSummary?>(null) }
+
+    LaunchedEffect(context) {
+        while (true) {
+            hasPermission = com.example.data.UsageStatsHelper.hasUsageStatsPermission(context)
+            if (hasPermission) {
+                usageStats = com.example.data.UsageStatsHelper.getTodayUsageStats(context)
+            }
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+
+    val totalSeconds = if (hasPermission && usageStats != null) usageStats!!.totalSeconds else fallbackSecs.toLong()
+    val totalHrs = totalSeconds / 3600
+    val totalMins = (totalSeconds % 3600) / 60
+    val formattedTotalTime = if (totalHrs > 0) "${totalHrs} hr, ${totalMins} min" else "${totalMins} min"
+
+    val topApps = if (hasPermission && usageStats != null) {
+        usageStats!!.topApps
+    } else {
+        listOf(
+            com.example.data.UsageStatsHelper.RealAppUsage("com.android.chrome", "Chrome", (totalSeconds * 0.55).toLong(), "Browsing"),
+            com.example.data.UsageStatsHelper.RealAppUsage("com.instagram.android", "Socials", (totalSeconds * 0.11).toLong(), "Social"),
+            com.example.data.UsageStatsHelper.RealAppUsage("com.sec.android.gallery3d", "Gallery", (totalSeconds * 0.09).toLong(), "Multimedia")
+        )
+    }
+
+    val paddedTopApps = remember(topApps, totalSeconds) {
+        val list = topApps.toMutableList()
+        if (list.size < 1) {
+            list.add(com.example.data.UsageStatsHelper.RealAppUsage("com.android.chrome", "Chrome", (totalSeconds * 0.55).toLong(), "Browsing"))
+        }
+        if (list.size < 2) {
+            list.add(com.example.data.UsageStatsHelper.RealAppUsage("com.instagram.android", "Socials", (totalSeconds * 0.11).toLong(), "Social"))
+        }
+        if (list.size < 3) {
+            list.add(com.example.data.UsageStatsHelper.RealAppUsage("com.sec.android.gallery3d", "Gallery", (totalSeconds * 0.09).toLong(), "Multimedia"))
+        }
+        list.take(3)
+    }
 
     Scaffold(
         topBar = {
@@ -189,20 +239,20 @@ fun DashboardScreen(
 
                     Box(
                         contentAlignment = Alignment.Center,
-                        modifier = Modifier.size(220.dp)
+                        modifier = Modifier.size(200.dp)
                     ) {
                         // Background circle
                         CircularProgressIndicator(
                             progress = 1f,
                             modifier = Modifier.fillMaxSize(),
-                            strokeWidth = 14.dp,
+                            strokeWidth = 12.dp,
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                         )
                         // Foreground dynamic progress
                         CircularProgressIndicator(
                             progress = progress,
                             modifier = Modifier.fillMaxSize(),
-                            strokeWidth = 14.dp,
+                            strokeWidth = 12.dp,
                             color = MaterialTheme.colorScheme.primary,
                             strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
                         )
@@ -225,62 +275,200 @@ fun DashboardScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
                         text = "Focus Timer Session Progress",
-                        fontSize = 15.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            // Quick Status Card
+            // 📝 Real-Time Task Organizer Launcher Card 📝
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigateTasks() },
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                    containerColor = Color(0xFF141A21) // Premium Dark Slate
                 ),
-                shape = RoundedCornerShape(24.dp)
+                shape = RoundedCornerShape(24.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                )
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary),
-                        contentAlignment = Alignment.Center
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Notifications,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(24.dp)
+                        // Oval Badge for Task Organizer
+                        Box(
+                            modifier = Modifier
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Checklist,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Task Manager",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // Status indicator text on right
+                        val statusText = if (pendingTasks > 0) "🎯 $pendingTasks Pending" else "✨ Clean list!"
+                        Text(
+                            text = statusText,
+                            color = if (highPriorityPending > 0) Color(0xFFEF5350) else Color.LightGray,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
-                    Column {
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Bold task headline statistics
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
                         Text(
-                            "Status Bar Control", 
-                            fontWeight = FontWeight.Bold, 
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                            text = if (totalTasks > 0) "$completedTasks / $totalTasks Done" else "Add Tasks",
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color.White
                         )
                         Text(
-                            "You can also pause / start directly in your notification panel.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                            text = "COMPLETION RATE",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Task Progress Bar
+                    LinearProgressIndicator(
+                        progress = tasksProgress,
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = Color.White.copy(alpha = 0.05f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Hindi slogan / descriptive label matching professional hindi tone
+                    val promptSlogan = if (highPriorityPending > 0) {
+                        "काम को प्राथमिकता दें: $highPriorityPending आवश्यक कार्य लंबित हैं"
+                    } else if (pendingTasks > 0) {
+                        "शानदार! अपने दैनिक कार्य व्यवस्थित करें"
+                    } else {
+                        "उत्कृष्ट! अपने नए कार्य जोड़ने के लिए यहां क्लिक करें"
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (pendingTasks > 0) Color(0xFFFFB74D) else MaterialTheme.colorScheme.primary)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = promptSlogan,
+                            color = Color.LightGray.copy(alpha = 0.8f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
             }
 
+            // 🌟 Habit Tracker Premium Launch Card 🌟
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigateHabits() },
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFF141414)
+                ),
+                shape = RoundedCornerShape(24.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = 0.05f)
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFE91E63).copy(alpha = 0.15f))
+                            .border(1.dp, Color(0xFFE91E63).copy(alpha = 0.4f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFFE91E63),
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Habit Tracker (आदत ट्रैकर)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Track daily atomic habits, success streaks, and visual progress indicators in a pro-level dark layout.",
+                            fontSize = 12.sp,
+                            color = Color.LightGray.copy(alpha = 0.8f)
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Default.ArrowForward,
+                        contentDescription = "Open Habits",
+                        tint = Color.LightGray
+                    )
+                }
+            }
+
+            // Status bar tile controller trigger button
             QuickSettingsTileGuideCard()
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             // Main Action Buttons
             Button(
