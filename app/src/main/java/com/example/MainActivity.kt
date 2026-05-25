@@ -204,6 +204,30 @@ fun SettingsScreen(
                 steps = 29
             )
             Text("${breakDuration / 60} mins", modifier = Modifier.align(Alignment.End))
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            val floatingTimerEnabled by settingsRepository.floatingTimerEnabledFlow.collectAsStateWithLifecycle(initialValue = true)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Floating Timer Overlay", fontWeight = FontWeight.Bold)
+                    Text(
+                        "Show draggable timer badge over other applications.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = floatingTimerEnabled,
+                    onCheckedChange = { isChecked ->
+                        scope.launch { settingsRepository.setFloatingTimerEnabled(isChecked) }
+                    }
+                )
+            }
         }
     }
 }
