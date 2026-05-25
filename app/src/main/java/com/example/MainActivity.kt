@@ -5,18 +5,29 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.content.ComponentName
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -26,6 +37,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.data.SettingsRepository
 import com.example.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalContext
 
 class MainActivity : ComponentActivity() {
 
@@ -74,10 +86,14 @@ class MainActivity : ComponentActivity() {
             overlayPermissionLauncher.launch(intent)
         } else {
             val serviceIntent = Intent(this, ScreenTimeService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Failed to start ScreenTimeService safely", e)
             }
         }
     }
@@ -101,13 +117,40 @@ fun DashboardScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Focus Lock") },
-                actions = {
-                    IconButton(onClick = onNavigateSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+            LargeTopAppBar(
+                title = { 
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Focus Lock", 
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
-                }
+                },
+                actions = {
+                    FilledIconButton(
+                        onClick = onNavigateSettings,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings, 
+                            contentDescription = "Settings",
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.largeTopAppBarColors(
+                    containerColor = Color.Transparent
+                )
             )
         }
     ) { innerPadding ->
@@ -115,42 +158,166 @@ fun DashboardScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(24.dp),
+                .padding(horizontal = 24.dp)
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            Text("Current Session", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(16.dp))
             
-            val remaining = (workDuration - currentSessionSeconds).coerceAtLeast(0)
-            val minutes = remaining / 60
-            val seconds = remaining % 60
-            
-            Text(
-                text = String.format("%02d:%02d", minutes, seconds),
-                fontSize = 56.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            
+            // Circular timer progress card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                shape = RoundedCornerShape(32.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    val remaining = (workDuration - currentSessionSeconds).coerceAtLeast(0)
+                    val minutes = remaining / 60
+                    val seconds = remaining % 60
+                    val progress = if (workDuration > 0) {
+                        currentSessionSeconds.toFloat() / workDuration.toFloat()
+                    } else 0f
+
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.size(220.dp)
+                    ) {
+                        // Background circle
+                        CircularProgressIndicator(
+                            progress = 1f,
+                            modifier = Modifier.fillMaxSize(),
+                            strokeWidth = 14.dp,
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                        )
+                        // Foreground dynamic progress
+                        CircularProgressIndicator(
+                            progress = progress,
+                            modifier = Modifier.fillMaxSize(),
+                            strokeWidth = 14.dp,
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
+                        )
+                        // Centered text
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = String.format("%02d:%02d", minutes, seconds),
+                                fontSize = 42.sp,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "REMAINING",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.outline,
+                                letterSpacing = 1.5.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Text(
+                        text = "Focus Timer Session Progress",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Quick Status Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                ),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Notifications,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            "Status Bar Control", 
+                            fontWeight = FontWeight.Bold, 
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            "You can also pause / start directly in your notification panel.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+            }
+
+            QuickSettingsTileGuideCard()
+
             Spacer(modifier = Modifier.height(8.dp))
-            Text("until next mandatory break", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            
-            Spacer(modifier = Modifier.height(48.dp))
-            
+
+            // Main Action Buttons
             Button(
                 onClick = onStartService,
-                modifier = Modifier.fillMaxWidth().height(56.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
             ) {
-                Text("Start Tracking")
+                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Start Tracking", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
-            Spacer(modifier = Modifier.height(16.dp))
+
             OutlinedButton(
                 onClick = onStopService,
-                modifier = Modifier.fillMaxWidth().height(56.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
             ) {
-                Text("Stop Tracking")
+                Icon(Icons.Default.Close, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Stop Tracking / Reset", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            DeveloperFooter()
+
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
@@ -164,13 +331,18 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val workDuration by settingsRepository.workDurationFlow.collectAsStateWithLifecycle(initialValue = 30 * 60)
     val breakDuration by settingsRepository.breakDurationFlow.collectAsStateWithLifecycle(initialValue = 5 * 60)
+    val floatingTimerEnabled by settingsRepository.floatingTimerEnabledFlow.collectAsStateWithLifecycle(initialValue = true)
+    val warningSoundEnabled by settingsRepository.warningSoundEnabledFlow.collectAsStateWithLifecycle(initialValue = true)
+    val strictModeEnabled by settingsRepository.strictModeEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = { Text("Settings (सेटिंग्स)", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    Button(onClick = onBack) { Text("Back") }
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
                 }
             )
         }
@@ -180,55 +352,436 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            Text("Work Duration (minutes)", fontWeight = FontWeight.Bold)
-            Slider(
-                value = (workDuration / 60).toFloat(),
-                onValueChange = { newValue ->
-                    scope.launch { settingsRepository.setWorkDuration(newValue.toInt() * 60) }
-                },
-                valueRange = 1f..120f,
-                steps = 119
-            )
-            Text("${workDuration / 60} mins", modifier = Modifier.align(Alignment.End))
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            Text("Break Duration (minutes)", fontWeight = FontWeight.Bold)
-            Slider(
-                value = (breakDuration / 60).toFloat(),
-                onValueChange = { newValue ->
-                    scope.launch { settingsRepository.setBreakDuration(newValue.toInt() * 60) }
-                },
-                valueRange = 1f..30f,
-                steps = 29
-            )
-            Text("${breakDuration / 60} mins", modifier = Modifier.align(Alignment.End))
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            val floatingTimerEnabled by settingsRepository.floatingTimerEnabledFlow.collectAsStateWithLifecycle(initialValue = true)
-            Row(
+            
+            // Work Duration Configuration Card
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                shape = RoundedCornerShape(24.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Floating Timer Overlay", fontWeight = FontWeight.Bold)
+                Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        "Show draggable timer badge over other applications.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        "Work Duration (काम का समय)", 
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
                     )
-                }
-                Switch(
-                    checked = floatingTimerEnabled,
-                    onCheckedChange = { isChecked ->
-                        scope.launch { settingsRepository.setFloatingTimerEnabled(isChecked) }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    var sliderWorkValue by remember(workDuration) { mutableStateOf((workDuration / 60).toFloat()) }
+                    Slider(
+                        value = sliderWorkValue,
+                        onValueChange = { sliderWorkValue = it },
+                        onValueChangeFinished = {
+                            scope.launch { settingsRepository.setWorkDuration(sliderWorkValue.toInt() * 60) }
+                        },
+                        valueRange = 1f..120f,
+                        steps = 119
+                    )
+                    
+                    Text(
+                        "${sliderWorkValue.toInt()} minutes", 
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.align(Alignment.End)
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Preset Shortcuts (त्वरित विकल्प):", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    
+                    // Prest shortcuts for focus session
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(10, 20, 30, 45, 60).forEach { mins ->
+                            val active = (workDuration / 60) == mins
+                            SuggestionChip(
+                                onClick = {
+                                    scope.launch { settingsRepository.setWorkDuration(mins * 60) }
+                                },
+                                label = { Text("${mins}m") },
+                                border = if (active) androidx.compose.foundation.BorderStroke(
+                                    width = 1.5.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                ) else androidx.compose.foundation.BorderStroke(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                colors = if (active) SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                ) else SuggestionChipDefaults.suggestionChipColors()
+                            )
+                        }
                     }
-                )
+                }
             }
+
+            // Break Duration Configuration Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "Break Duration (ब्रेक का समय)", 
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    var sliderBreakValue by remember(breakDuration) { mutableStateOf((breakDuration / 60).toFloat()) }
+                    Slider(
+                        value = sliderBreakValue,
+                        onValueChange = { sliderBreakValue = it },
+                        onValueChangeFinished = {
+                            scope.launch { settingsRepository.setBreakDuration(sliderBreakValue.toInt() * 60) }
+                        },
+                        valueRange = 1f..30f,
+                        steps = 29
+                    )
+                    
+                    Text(
+                        "${sliderBreakValue.toInt()} minutes", 
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.align(Alignment.End)
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Preset Shortcuts (त्वरित विकल्प):", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    
+                    // Preset shortcuts for focus break
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(1, 2, 3, 5, 10).forEach { mins ->
+                            val active = (breakDuration / 60) == mins
+                            SuggestionChip(
+                                onClick = {
+                                    scope.launch { settingsRepository.setBreakDuration(mins * 60) }
+                                },
+                                label = { Text("${mins}m") },
+                                border = if (active) androidx.compose.foundation.BorderStroke(
+                                    width = 1.5.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                ) else androidx.compose.foundation.BorderStroke(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                colors = if (active) SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                ) else SuggestionChipDefaults.suggestionChipColors()
+                            )
+                        }
+                    }
+                }
+            }
+
+            // General Settings List Container
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    Text(
+                        "Advanced Options (अतिरिक्त सेटिंग्स)", 
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+
+                    // 1. Floating Timer Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Floating Timer Overlay", fontWeight = FontWeight.Bold)
+                            Text(
+                                "Show draggable minutes timer badge over other applications.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = floatingTimerEnabled,
+                            onCheckedChange = { isChecked ->
+                                scope.launch { settingsRepository.setFloatingTimerEnabled(isChecked) }
+                            }
+                        )
+                    }
+
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                    // 2. 3-Second Warning Buzzer Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("3-Sec Warning Beep (चेतावनी टोन)", fontWeight = FontWeight.Bold)
+                            Text(
+                                "Play an alert sound 3 seconds before focus session finishes.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = warningSoundEnabled,
+                            onCheckedChange = { isChecked ->
+                                scope.launch { settingsRepository.setWarningSoundEnabled(isChecked) }
+                            }
+                        )
+                    }
+
+                    Divider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                    // 3. Strict focus mode Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Strict Lock Mode (कठोर अनुशासन)", fontWeight = FontWeight.Bold)
+                            Text(
+                                "Force absolute screen locks over apps. Restrict quick bypasses during break.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = strictModeEnabled,
+                            onCheckedChange = { isChecked ->
+                                scope.launch { settingsRepository.setStrictModeEnabled(isChecked) }
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            DeveloperFooter()
+
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
 
+@Composable
+fun DeveloperFooter(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable {
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://instagram.com/jitendrauno"))
+                    intent.addCategory(Intent.CATEGORY_BROWSABLE) // safe standard category setting
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    // fall back
+                }
+            },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        ),
+        shape = RoundedCornerShape(20.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFFF91A4E), // Instagram Red-Orange
+                                Color(0xFF8A3AB9), // Purple
+                                Color(0xFF4C58D2)  // Blue
+                            )
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = "Developer Profile",
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "डेवलपर की जानकारी (Developer Info)",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = "Jitendra • @jitendrauno",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Tap to connect on Instagram for updates",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.ArrowForward,
+                contentDescription = "Open Link",
+                tint = MaterialTheme.colorScheme.outline
+            )
+        }
+    }
+}
+
+@Composable
+fun QuickSettingsTileGuideCard(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val isNativelySupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.15f)
+        ),
+        shape = RoundedCornerShape(24.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.secondary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Column {
+                    Text(
+                        text = "वन-क्लिक क्विक टाइल (QS Tile)",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Text(
+                        text = "Enable tracking in 1-tap like Wi-Fi & Data",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                    )
+                }
+            }
+
+            Text(
+                text = "जैसे आप मोबाइल में वाई-फाई या डेटा ऑन करते हैं, वैसे ही नोटिफिकेशन पैनल को नीचे खींचकर एक क्लिक में Focus Lock को चालू/बंद कर सकते हैं!",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 20.sp
+            )
+
+            Column(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = "टाइल जोड़ने का तरीका (How to Setup):",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+                Text(
+                    text = "1. मोबाइल के नोटिफिकेशन पैनल (Status Bar) को नीचे स्वाइप करें।",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "2. एडिट (✏️ / Pencil) बटन पर टैप करें।",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "3. नीचे छूटे बटन्स में से 'Focus Lock' ढूंढें और उसे खींचकर ऊपर सक्रिय टाइल्स (Wifi/Data के पास) में ले जाएं।",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (isNativelySupported) {
+                Button(
+                    onClick = {
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                val statusBarManager = context.getSystemService(android.app.StatusBarManager::class.java)
+                                val componentName = ComponentName(context, FocusLockTileService::class.java)
+                                statusBarManager?.requestAddTileService(
+                                    componentName,
+                                    "Focus Lock",
+                                    android.graphics.drawable.Icon.createWithResource(context, android.R.drawable.ic_lock_lock),
+                                    context.mainExecutor
+                                ) { _ -> }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "Error requesting tile service", e)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary
+                    ),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("नोटिफिकेशन पैनल में बटन जोड़ें (Add Tile)", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}

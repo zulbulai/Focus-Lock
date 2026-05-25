@@ -74,11 +74,20 @@ class MyServiceLifecycleOwner : LifecycleOwner, ViewModelStoreOwner, SavedStateR
 
 class ScreenTimeService : Service() {
 
+    companion object {
+        const val ACTION_START = "com.example.action.START"
+        const val ACTION_STOP = "com.example.action.STOP"
+
+        @Volatile
+        var isRunning = false
+    }
+
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var settingsRepository: SettingsRepository
     
     private var isScreenOn = true
     private var tickerJob: Job? = null
+    private var isTrackingPaused = false
     
     private var isBreakActive = false
     private var breakJob: Job? = null
@@ -110,6 +119,7 @@ class ScreenTimeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
         settingsRepository = SettingsRepository(applicationContext)
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
@@ -117,26 +127,13 @@ class ScreenTimeService : Service() {
         }
         registerReceiver(screenReceiver, filter)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        startForegroundService()
+        updateNotification()
         startTicker()
 
-        // Combine flow collector to automatically add / remove the overlay based on preference changes
+        // Observe preference changes to automatically sync visibility
         serviceScope.launch {
-            combine(
-                settingsRepository.floatingTimerEnabledFlow,
-                settingsRepository.currentSessionSecondsFlow,
-                settingsRepository.workDurationFlow
-            ) { enabled, current, limit ->
-                Triple(enabled, current, limit)
-            }.collect { (enabled, current, limit) ->
-                withContext(Dispatchers.Main) {
-                    val shouldShow = enabled && isScreenOn && !isBreakActive && !isFloatingTimerDismissedForSession
-                    if (shouldShow) {
-                        showFloatingTimerOverlay()
-                    } else {
-                        removeFloatingTimerOverlay()
-                    }
-                }
+            settingsRepository.floatingTimerEnabledFlow.collect {
+                updateFloatingTimerVisibility()
             }
         }
     }
@@ -145,7 +142,12 @@ class ScreenTimeService : Service() {
         serviceScope.launch {
             val enabled = settingsRepository.floatingTimerEnabledFlow.first()
             withContext(Dispatchers.Main) {
-                val shouldShow = enabled && isScreenOn && !isBreakActive && !isFloatingTimerDismissedForSession
+                val hasPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    android.provider.Settings.canDrawOverlays(this@ScreenTimeService)
+                } else {
+                    true
+                }
+                val shouldShow = enabled && isScreenOn && !isBreakActive && !isFloatingTimerDismissedForSession && hasPermission
                 if (shouldShow) {
                     showFloatingTimerOverlay()
                 } else {
@@ -155,7 +157,25 @@ class ScreenTimeService : Service() {
         }
     }
 
-    private fun startForegroundService() {
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent != null) {
+            when (intent.action) {
+                ACTION_START -> {
+                    isTrackingPaused = false
+                    updateNotification()
+                    updateFloatingTimerVisibility()
+                }
+                ACTION_STOP -> {
+                    isTrackingPaused = true
+                    updateNotification()
+                    updateFloatingTimerVisibility()
+                }
+            }
+        }
+        return START_STICKY
+    }
+
+    private fun updateNotification() {
         val channelId = "screen_time_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -164,14 +184,37 @@ class ScreenTimeService : Service() {
                 NotificationManager.IMPORTANCE_LOW
             )
             val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            manager?.createNotificationChannel(channel)
         }
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Focus Lock Active")
-            .setContentText("Monitoring screen time to enforce breaks.")
+
+        val startIntent = Intent(this, ScreenTimeService::class.java).apply { action = ACTION_START }
+        val stopIntent = Intent(this, ScreenTimeService::class.java).apply { action = ACTION_STOP }
+
+        val startPendingIntent = PendingIntent.getService(
+            this, 1, startIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val stopPendingIntent = PendingIntent.getService(
+            this, 2, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val statusText = if (isTrackingPaused) "Paused" else "Running"
+        val builder = NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Focus Lock ($statusText)")
+            .setContentText("Tap buttons below or use the Quick Settings tile.")
             .setSmallIcon(android.R.drawable.ic_menu_recent_history)
-            .build()
-        startForeground(101, notification)
+            .setContentIntent(PendingIntent.getActivity(
+                this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+            ))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+
+        if (isTrackingPaused) {
+            builder.addAction(android.R.drawable.ic_media_play, "Start Tracking", startPendingIntent)
+        } else {
+            builder.addAction(android.R.drawable.ic_media_pause, "Pause Tracking", stopPendingIntent)
+        }
+
+        startForeground(101, builder.build())
     }
 
     private fun startTicker() {
@@ -179,16 +222,40 @@ class ScreenTimeService : Service() {
         tickerJob = serviceScope.launch {
             while (isActive && isScreenOn && !isBreakActive) {
                 delay(1000)
+                if (isTrackingPaused) {
+                    continue
+                }
                 val limit = settingsRepository.workDurationFlow.first()
                 val current = settingsRepository.currentSessionSecondsFlow.first()
+                
+                val nextVal = current + 1
+                val remaining = limit - nextVal
+                
+                if (remaining == 3) {
+                    val warningSoundEnabled = settingsRepository.warningSoundEnabledFlow.first()
+                    if (warningSoundEnabled) {
+                        playWarningTone()
+                    }
+                }
+
                 if (current >= limit) {
                     // Trigger Break
                     triggerBreak()
                     break
                 } else {
-                    settingsRepository.setCurrentSessionSeconds(current + 1)
+                    settingsRepository.setCurrentSessionSeconds(nextVal)
                 }
             }
+        }
+    }
+
+    private fun playWarningTone() {
+        try {
+            val toneGen = android.media.ToneGenerator(android.media.AudioManager.STREAM_ALARM, 85)
+            toneGen.startTone(android.media.ToneGenerator.TONE_CDMA_PIP, 400)
+            toneGen.release()
+        } catch (e: Exception) {
+            Log.e("ScreenTimeService", "Error playing warning beep", e)
         }
     }
 
@@ -387,21 +454,8 @@ class ScreenTimeService : Service() {
                     Row(
                         modifier = Modifier
                             .wrapContentSize()
-                            .pointerInput(Unit) {
-                                detectDragGestures { change, dragAmount ->
-                                    change.consume()
-                                    params.x += dragAmount.x.toInt()
-                                    params.y += dragAmount.y.toInt()
-                                    try {
-                                        windowManager?.updateViewLayout(this@apply, params)
-                                    } catch (e: Exception) {
-                                        Log.e("ScreenTimeService", "Error dragging floating view", e)
-                                    }
-                                }
-                            }
                             .clip(RoundedCornerShape(24.dp))
                             .background(Color(0xE61E1E24))
-                            .clickable { /* Prevents click-through while dragging */ }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -427,11 +481,7 @@ class ScreenTimeService : Service() {
                             modifier = Modifier
                                 .size(20.dp)
                                 .clip(RoundedCornerShape(50))
-                                .background(Color(0xFF33333C))
-                                .clickable {
-                                    isFloatingTimerDismissedForSession = true
-                                    updateFloatingTimerVisibility()
-                                },
+                                .background(Color(0xFF33333C)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -443,6 +493,55 @@ class ScreenTimeService : Service() {
                         }
                     }
                 }
+            }
+        }
+
+        var initialX = 0
+        var initialY = 0
+        var initialTouchX = 0f
+        var initialTouchY = 0f
+        var isDragging = false
+
+        composeView.setOnTouchListener { view, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    initialX = params.x
+                    initialY = params.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    isDragging = false
+                    true
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - initialTouchX
+                    val dy = event.rawY - initialTouchY
+                    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                        isDragging = true
+                        params.x = (initialX + dx).toInt()
+                        params.y = (initialY + dy).toInt()
+                        try {
+                            windowManager?.updateViewLayout(view, params)
+                        } catch (e: Exception) {
+                            Log.e("ScreenTimeService", "Error dragging floating view", e)
+                        }
+                    }
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    if (!isDragging) {
+                        // Click gesture! Detect if it falls on the close button region (on the right end of the view)
+                        val viewWidth = view.width
+                        val clickX = event.x
+                        // If click is within the last 100 pixels (close icon hits are near the rightmost-edge)
+                        if (clickX > viewWidth - 100) {
+                            isFloatingTimerDismissedForSession = true
+                            updateFloatingTimerVisibility()
+                        }
+                    }
+                    view.performClick()
+                    true
+                }
+                else -> false
             }
         }
 
@@ -473,6 +572,7 @@ class ScreenTimeService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        isRunning = false
         unregisterReceiver(screenReceiver)
         serviceScope.cancel()
         removeBreakOverlay()
@@ -486,10 +586,14 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
             val serviceIntent = Intent(context, ScreenTimeService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
-            } else {
-                context.startService(serviceIntent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            } catch (e: Exception) {
+                Log.e("BootReceiver", "Failed to start service on boot safely", e)
             }
         }
     }

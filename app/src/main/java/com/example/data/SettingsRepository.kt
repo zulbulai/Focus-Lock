@@ -15,12 +15,16 @@ class SettingsRepository(private val context: Context) {
         val BREAK_DURATION = intPreferencesKey("break_duration")
         val CURRENT_SESSION_SECONDS = intPreferencesKey("current_session_seconds")
         val FLOATING_TIMER_ENABLED = booleanPreferencesKey("floating_timer_enabled")
+        val WARNING_SOUND_ENABLED = booleanPreferencesKey("warning_sound_enabled")
+        val STRICT_MODE_ENABLED = booleanPreferencesKey("strict_mode_enabled")
     }
 
     val workDurationFlow: Flow<Int> = context.dataStore.data.map { it[WORK_DURATION] ?: (30 * 60) }
     val breakDurationFlow: Flow<Int> = context.dataStore.data.map { it[BREAK_DURATION] ?: (5 * 60) }
     val currentSessionSecondsFlow: Flow<Int> = context.dataStore.data.map { it[CURRENT_SESSION_SECONDS] ?: 0 }
     val floatingTimerEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[FLOATING_TIMER_ENABLED] ?: true }
+    val warningSoundEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[WARNING_SOUND_ENABLED] ?: true }
+    val strictModeEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[STRICT_MODE_ENABLED] ?: false }
 
     suspend fun setWorkDuration(seconds: Int) {
         context.dataStore.edit { it[WORK_DURATION] = seconds }
@@ -36,5 +40,13 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setFloatingTimerEnabled(enabled: Boolean) {
         context.dataStore.edit { it[FLOATING_TIMER_ENABLED] = enabled }
+    }
+
+    suspend fun setWarningSoundEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[WARNING_SOUND_ENABLED] = enabled }
+    }
+
+    suspend fun setStrictModeEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[STRICT_MODE_ENABLED] = enabled }
     }
 }
