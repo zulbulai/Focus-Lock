@@ -73,62 +73,7 @@ fun UnifiedWorkspace(
     val logsFlow = remember { database.habitDao().getAllLogs() }
     val logs by logsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
 
-    // Pre-populate habits and tasks on first launch if empty
-    LaunchedEffect(Unit) {
-        val allHabits = database.habitDao().getAllHabits().first()
-        if (allHabits.isEmpty()) {
-            database.habitDao().insertHabit(
-                HabitEntity(
-                    title = "सुबह जल्दी उठना (Wake up early)",
-                    description = "Arise before 6:00 AM for mental peace and writing",
-                    colorHex = "#FFB300",
-                    iconName = "bed",
-                    category = "Health",
-                    frequencyType = "Everyday"
-                )
-            )
-            database.habitDao().insertHabit(
-                HabitEntity(
-                    title = "नियमित व्यायाम (Exercise regularly)",
-                    description = "30 minutes stretching & cardio",
-                    colorHex = "#2196F3",
-                    iconName = "fitness",
-                    category = "Productivity",
-                    frequencyType = "Everyday"
-                )
-            )
-            database.habitDao().insertHabit(
-                HabitEntity(
-                    title = "गहन ध्यान (Deep Meditate)",
-                    description = "10 minutes of complete silence & focused breathing",
-                    colorHex = "#E91E63",
-                    iconName = "star",
-                    category = "Mind",
-                    frequencyType = "Everyday"
-                )
-            )
-        }
 
-        val allTasks = database.taskDao().getAllTasks().first()
-        if (allTasks.isEmpty()) {
-            database.taskDao().insertTask(
-                TaskEntity(
-                    title = "दैनिक योजना बनाना (Create Daily Agenda)",
-                    description = "Outline the vital target items for the day",
-                    priority = "High",
-                    category = "Work"
-                )
-            )
-            database.taskDao().insertTask(
-                TaskEntity(
-                    title = "फोकस ताला टूल कॉन्फ़िगर करें (Focus Lock Configuration)",
-                    description = "Configure custom tones and timing settings",
-                    priority = "Medium",
-                    category = "Study"
-                )
-            )
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -643,9 +588,6 @@ fun FocusTimerWorkspace(
                 }
             }
         }
-
-        // Guideline of shortcut adding
-        QuickSettingsTileGuideCard()
 
         Spacer(modifier = Modifier.height(10.dp))
     }
@@ -1179,11 +1121,26 @@ fun HabitsWorkspace(
                     .weight(1f),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    "आदतें लोड हो रही हैं...",
-                    color = Color.Gray,
-                    fontSize = 13.sp
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.WorkspacePremium,
+                        contentDescription = null,
+                        tint = Color.Gray,
+                        modifier = Modifier.size(54.dp)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        "कोई आदत नहीं मिली (No habits here)",
+                        fontSize = 13.sp,
+                        color = Color.LightGray,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "नई आदत जोड़ने के लिए 'नई आदत जोड़े' बटन दबाएँ",
+                        fontSize = 11.sp,
+                        color = Color.Gray
+                    )
+                }
             }
         } else {
             LazyColumn(
@@ -1736,32 +1693,4 @@ fun getUnifiedWorkspaceWeekDays(): List<DayOfWeekInfo> {
     return list
 }
 
-@Composable
-fun QuickSettingsTileGuideCard() {
-    val context = LocalContext.current
-    Button(
-        onClick = {
-            Toast.makeText(
-                context,
-                "Status Bar को स्वाइप कर 'Edit' बटन से 'Focus Lock' जोड़ें!",
-                Toast.LENGTH_LONG
-            ).show()
-        },
-        modifier = Modifier.fillMaxWidth(),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = Color(0xFF1B2430),
-            contentColor = Color.LightGray
-        ),
-        shape = RoundedCornerShape(16.dp),
-        contentPadding = PaddingValues(16.dp)
-    ) {
-        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = "Status Bar में शॉर्टकट जोड़ें (Add Quick Status Tile)",
-            fontWeight = FontWeight.Bold,
-            fontSize = 12.sp,
-            color = Color.LightGray
-        )
-    }
-}
+
